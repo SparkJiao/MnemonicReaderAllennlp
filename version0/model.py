@@ -10,7 +10,7 @@ from allennlp.models.model import Model
 from allennlp.modules import Highway
 from allennlp.modules import Seq2SeqEncoder, SimilarityFunction, TimeDistributed, TextFieldEmbedder
 from allennlp.modules.seq2seq_encoders.pytorch_seq2seq_wrapper import PytorchSeq2SeqWrapper
-from allennlp.modules import stacked_bidirectional_lstm
+from allennlp.modules.stacked_bidirectional_lstm import StackedBidirectionalLstm
 from allennlp.modules.matrix_attention.legacy_matrix_attention import LegacyMatrixAttention
 from allennlp.nn import util, InitializerApplicator, RegularizerApplicator
 from allennlp.training.metrics import BooleanAccuracy, CategoricalAccuracy, SquadEmAndF1
@@ -28,7 +28,7 @@ class BidirectionalAttentionFlow(Model):
                  text_field_embedder: TextFieldEmbedder,
                  num_highway_layers: int,
                  phrase_layer: Seq2SeqEncoder,
-                 stacked_brnn: Seq2SeqEncoder,
+                 # stacked_brnn: Seq2SeqEncoder,
                  hops: int,
                  hidden_dim: int,
                  dropout: float = 0.2,
@@ -42,7 +42,9 @@ class BidirectionalAttentionFlow(Model):
                                                       num_highway_layers))
         self._phrase_layer = phrase_layer
         self._encoding_dim = phrase_layer.get_output_dim()
-        self._stacked_brnn = stacked_brnn
+        # self._stacked_brnn = PytorchSeq2SeqWrapper(
+        #     StackedBidirectionalLstm(input_size=self._encoding_dim, hidden_size=hidden_dim,
+        #                              num_layers=3, recurrent_dropout_probability=0.2))
 
         self.hops = hops
 
@@ -112,6 +114,8 @@ class BidirectionalAttentionFlow(Model):
         encoded_passage = self._dropout(self._phrase_layer(embedded_passage, passage_lstm_mask))
         encoding_dim = encoded_question.size(-1)
 
+        # c_check = self._stacked_brnn(encoded_passage, passage_lstm_mask)
+        # q = self._stacked_brnn(encoded_question, question_lstm_mask)
         c_check = encoded_passage
         q = encoded_question
         for i in range(self.hops):
@@ -194,12 +198,8 @@ class BidirectionalAttentionFlow(Model):
 
     @overrides
     def decode(self, output_dict: Dict[str, torch.Tensor]) -> Dict[str, Any]:
-        yesno_tags = [[self.vocab.get_token_from_index(x, namespace="yesno_labels") for x in yn_list] \
-                      for yn_list in output_dict.pop("yesno")]
-        # followup_tags = [[self.vocab.get_token_from_index(x, namespace="followup_labels") for x in followup_list] \
-        #                  for followup_list in output_dict.pop("followup")]
+        yesno_tags = [self.vocab.get_token_from_index(x, namespace="yesno_labels") for x in output_dict.pop("yesno")]
         output_dict['yesno'] = yesno_tags
-        # output_dict['followup'] = followup_tags
         return output_dict
 
     @staticmethod

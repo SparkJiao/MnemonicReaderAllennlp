@@ -70,11 +70,10 @@ class SquadReader(DatasetReader):
             dataset = dataset_json['data']
         logger.info("Reading the dataset")
 
+        num = 0
         for story_id, paragraph_json in enumerate(dataset):
             paragraph = paragraph_json["story"]
-            # paragraph = paragraph_json["story"].strip().replace("\n", "")
             n_paragraph, padding = self.delete_leading_tokens_of_paragraph(paragraph)
-            # tokenized_paragraph = self._tokenizer.tokenize(paragraph)
             tokenized_paragraph = self._tokenizer.tokenize(n_paragraph)
 
             ind = 0
@@ -82,8 +81,6 @@ class SquadReader(DatasetReader):
                 question_text = question_answer["input_text"].strip().replace("\n", "")
                 # question_text = question_answer["input_text"].replace("\n", "")
                 answer_texts = []
-
-                x_num = yes_num = no_num = 0
 
                 tmp = paragraph_json["answers"][ind]['span_text']
                 before = self.get_front_blanks(tmp, padding)
@@ -93,32 +90,32 @@ class SquadReader(DatasetReader):
                 end = start + len(span_text)
 
                 if input_text.lower() == 'yes':
-                    yes_num += 1
+                    yesno = 'y'
                     answer = span_text
                 elif input_text.lower() == 'no':
-                    no_num += 1
+                    yesno = 'n'
                     answer = span_text
-                else:
-                    x_num += 1
-                    answer = input_text
-
-                # debug 10.15 21:20
-                # unknown questions
-                if answer.lower() == "unknown":
+                elif input_text.lower() == 'unknown':
                     answer = n_paragraph[0]
+                    yesno = 'x'
                     start = 0
                     end = 0
+                else:
+                    yesno = 'x'
+                    begin = span_text.find(input_text)
+                    if begin != -1:
+                        start = start + begin
+                        end = start + len(input_text)
+                        num += 1
+                    answer = input_text
 
                 answer_texts.append(answer)
-                # answer_texts = [answer['text'] for answer in question_answer['answers']]
 
                 span_starts = list()
                 span_starts.append(start)
 
                 span_ends = list()
                 span_ends.append(end)
-                # span_starts = [answer['answer_start'] for answer in question_answer['answers']]
-                # span_ends = [start + len(answer) for start, answer in zip(span_starts, answer_texts)]
 
                 if "additional_answers" in paragraph_json:
                     additional_answers = paragraph_json["additional_answers"]
@@ -132,50 +129,38 @@ class SquadReader(DatasetReader):
                         end = start + len(span_text)
 
                         if input_text.lower() == 'yes':
-                            yes_num += 1
                             answer = span_text
                         elif input_text.lower() == 'no':
-                            no_num += 1
                             answer = span_text
-                        else:
-                            x_num += 1
-                            answer = input_text
-
-                        # debug 10.15 21:20
-                        if answer.lower() == "unknown":
+                        elif input_text.lower() == 'unknown':
                             answer = n_paragraph[0]
                             start = 0
                             end = 0
+                        else:
+                            begin = span_text.find(input_text)
+                            if begin != -1:
+                                start = start + begin
+                                end = start + len(input_text)
+                                num += 1
+                            answer = input_text
 
                         answer_texts.append(answer)
                         span_starts.append(start)
                         span_ends.append(end)
 
-                # deal with yes/no question
-                # make yesno
-                if yes_num == no_num or (x_num > yes_num and x_num > no_num):
-                    yesno = 'x'
-                elif yes_num > no_num:
-                    yesno = 'y'
-                elif no_num > yes_num:
-                    yesno = 'n'
-                else:
-                    yesno = 'x'
-                # yesno dealing stop here 18.10.29
-
                 ind += 1
                 # print(paragraph)
 
-                # yesno deal 18.10.29
-                # instance.add_field("yesno", LabelField(yesno, label_namespace="yesno_labels"))
                 instance = self.text_to_instance(question_text,
-                                                 paragraph,
+                                                 n_paragraph,
                                                  zip(span_starts, span_ends),
                                                  answer_texts,
                                                  yesno,
                                                  tokenized_paragraph)
                 # yesno dealing stop here 18.10.29
                 yield instance
+
+        logger.info('start and end changed num: %d' % num)
 
     def get_front_blanks(self, answer, padding):
         answer = answer.replace("\n", "")
@@ -245,43 +230,6 @@ def make_reading_comprehension_instance(question_tokens: List[Token],
                                         answer_texts: List[str] = None,
                                         yesno: str = None,
                                         additional_metadata: Dict[str, Any] = None) -> Instance:
-    """
-    Converts a question, a passage, and an optional answer (or answers) to an ``Instance`` for use
-    in a reading comprehension model.
-    Creates an ``Instance`` with at least these fields: ``question`` and ``passage``, both
-    ``TextFields``; and ``metadata``, a ``MetadataField``.  Additionally, if both ``answer_texts``
-    and ``char_span_starts`` are given, the ``Instance`` has ``span_start`` and ``span_end``
-    fields, which are both ``IndexFields``.
-    Parameters
-    ----------
-    question_tokens : ``List[Token]``
-        An already-tokenized question.
-    passage_tokens : ``List[Token]``
-        An already-tokenized passage that contains the answer to the given question.
-    token_indexers : ``Dict[str, TokenIndexer]``
-        Determines how the question and passage ``TextFields`` will be converted into tensors that
-        get input to a model.  See :class:`TokenIndexer`.
-    passage_text : ``str``
-        The original passage text.  We need this so that we can recover the actual span from the
-        original passage that the model predicts as the answer to the question.  This is used in
-        official evaluation scripts.
-    token_spans : ``List[Tuple[int, int]]``, optional
-        Indices into ``passage_tokens`` to use as the answer to the question for training.  This is
-        a list because there might be several possible correct answer spans in the passage.
-        Currently, we just select the most frequent span in this list (i.e., SQuAD has multiple
-        annotations on the dev set; this will select the span that the most annotators gave as
-        correct).
-    answer_texts : ``List[str]``, optional
-        All valid answer strings for the given question.  In SQuAD, e.g., the training set has
-        exactly one answer per question, but the dev and test sets have several.  TriviaQA has many
-        possible answers, which are the aliases for the known correct entity.  This is put into the
-        metadata for use with official evaluation scripts, but not used anywhere else.
-    additional_metadata : ``Dict[str, Any]``, optional
-        The constructed ``metadata`` field will by default contain ``original_passage``,
-        ``token_offsets``, ``question_tokens``, ``passage_tokens``, and ``answer_texts`` keys.  If
-        you want any other metadata to be associated with each instance, you can pass that in here.
-        This dictionary will get added to the ``metadata`` dictionary we already construct.
-    """
     additional_metadata = additional_metadata or {}
     fields: Dict[str, Field] = {}
     passage_offsets = [(token.idx, token.idx + len(token.text)) for token in passage_tokens]
