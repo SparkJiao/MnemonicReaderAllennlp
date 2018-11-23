@@ -28,7 +28,7 @@ class BidirectionalAttentionFlow(Model):
                  text_field_embedder: TextFieldEmbedder,
                  num_highway_layers: int,
                  phrase_layer: Seq2SeqEncoder,
-                 # stacked_brnn: Seq2SeqEncoder,
+                 char_rnn: Seq2SeqEncoder,
                  hops: int,
                  hidden_dim: int,
                  dropout: float = 0.2,
@@ -45,6 +45,7 @@ class BidirectionalAttentionFlow(Model):
         # self._stacked_brnn = PytorchSeq2SeqWrapper(
         #     StackedBidirectionalLstm(input_size=self._encoding_dim, hidden_size=hidden_dim,
         #                              num_layers=3, recurrent_dropout_probability=0.2))
+        self._char_rnn = char_rnn
 
         self.hops = hops
 
@@ -103,6 +104,7 @@ class BidirectionalAttentionFlow(Model):
 
         embedded_question = self._highway_layer(self._text_field_embedder(question))
         embedded_passage = self._highway_layer(self._text_field_embedder(passage))
+
         batch_size = embedded_question.size(0)
         passage_length = embedded_passage.size(1)
         question_mask = util.get_text_field_mask(question).float()
@@ -110,8 +112,17 @@ class BidirectionalAttentionFlow(Model):
         question_lstm_mask = question_mask if self._mask_lstms else None
         passage_lstm_mask = passage_mask if self._mask_lstms else None
 
-        encoded_question = self._dropout(self._phrase_layer(embedded_question, question_lstm_mask))
-        encoded_passage = self._dropout(self._phrase_layer(embedded_passage, passage_lstm_mask))
+        token_emb_q, char_emb_q = torch.split(embedded_question, [100, 100], dim=2)
+        token_emb_c, char_emb_c = torch.split(embedded_passage, [100, 100], dim=2)
+
+        char_features_q = self._char_rnn(char_emb_q, question_lstm_mask)
+        char_features_c = self._char_rnn(char_emb_c, passage_lstm_mask)
+
+        emb_question = torch.cat([token_emb_q, char_features_q], dim=2)
+        emb_passage = torch.cat([token_emb_c, char_features_c], dim=2)
+
+        encoded_question = self._dropout(self._phrase_layer(emb_question, question_lstm_mask))
+        encoded_passage = self._dropout(self._phrase_layer(emb_passage, passage_lstm_mask))
         encoding_dim = encoded_question.size(-1)
 
         # c_check = self._stacked_brnn(encoded_passage, passage_lstm_mask)
