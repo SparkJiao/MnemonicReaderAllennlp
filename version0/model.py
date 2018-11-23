@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 class BidirectionalAttentionFlow(Model):
     def __init__(self, vocab: Vocabulary,
                  text_field_embedder: TextFieldEmbedder,
-                 num_highway_layers: int,
+                 # num_highway_layers: int,
                  phrase_layer: Seq2SeqEncoder,
                  char_rnn: Seq2SeqEncoder,
                  hops: int,
@@ -38,8 +38,9 @@ class BidirectionalAttentionFlow(Model):
         super(BidirectionalAttentionFlow, self).__init__(vocab, regularizer)
 
         self._text_field_embedder = text_field_embedder
-        self._highway_layer = TimeDistributed(Highway(text_field_embedder.get_output_dim(),
-                                                      num_highway_layers))
+        self._features_embedder = nn.Embedding(2, 5)
+        # self._highway_layer = TimeDistributed(Highway(text_field_embedder.get_output_dim() + 5 * 3,
+        #                                               num_highway_layers))
         self._phrase_layer = phrase_layer
         self._encoding_dim = phrase_layer.get_output_dim()
         # self._stacked_brnn = PytorchSeq2SeqWrapper(
@@ -99,11 +100,30 @@ class BidirectionalAttentionFlow(Model):
                 span_start: torch.IntTensor = None,
                 span_end: torch.IntTensor = None,
                 yesno: torch.IntTensor = None,
+                question_tf: torch.FloatTensor = None,
+                passage_tf: torch.FloatTensor = None,
+                q_em_cased: torch.IntTensor = None,
+                p_em_cased: torch.IntTensor = None,
+                q_em_uncased: torch.IntTensor = None,
+                p_em_uncased: torch.IntTensor = None,
+                q_in_lemma: torch.IntTensor = None,
+                p_in_lemma: torch.IntTensor = None,
                 metadata: List[Dict[str, Any]] = None) -> Dict[str, torch.Tensor]:
         # pylint: disable=arguments-differ
 
-        embedded_question = self._highway_layer(self._text_field_embedder(question))
-        embedded_passage = self._highway_layer(self._text_field_embedder(passage))
+        embedded_question = torch.cat([self._dropout(self._text_field_embedder(question)),
+                                       self._features_embedder(q_em_cased),
+                                       self._features_embedder(q_em_uncased),
+                                       self._features_embedder(q_in_lemma),
+                                       question_tf.unsqueeze(2)], dim=2)
+        embedded_passage = torch.cat([self._dropout(self._text_field_embedder(passage)),
+                                      self._features_embedder(p_em_cased),
+                                      self._features_embedder(p_em_uncased),
+                                      self._features_embedder(p_in_lemma),
+                                      passage_tf.unsqueeze(2)], dim=2)
+
+        # embedded_question = self._highway_layer(embedded_q)
+        # embedded_passage = self._highway_layer(embedded_q)
 
         batch_size = embedded_question.size(0)
         passage_length = embedded_passage.size(1)
@@ -112,8 +132,8 @@ class BidirectionalAttentionFlow(Model):
         question_lstm_mask = question_mask if self._mask_lstms else None
         passage_lstm_mask = passage_mask if self._mask_lstms else None
 
-        token_emb_q, char_emb_q, question_word_features = torch.split(embedded_question, [300, 100, 40], dim=2)
-        token_emb_c, char_emb_c, passage_word_features = torch.split(embedded_passage, [300, 100, 40], dim=2)
+        token_emb_q, char_emb_q, question_word_features = torch.split(embedded_question, [300, 100, 56], dim=2)
+        token_emb_c, char_emb_c, passage_word_features = torch.split(embedded_passage, [300, 100, 56], dim=2)
 
         char_features_q = self._char_rnn(char_emb_q, question_lstm_mask)
         char_features_c = self._char_rnn(char_emb_c, passage_lstm_mask)

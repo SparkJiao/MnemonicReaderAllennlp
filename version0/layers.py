@@ -82,7 +82,6 @@ class MemoryAnsPointer(nn.Module):
 
 class SeqAttnMatch(nn.Module):
     """Given sequences X and Y, match sequence Y to each element in X.
-
         * o_i = sum(alpha_j * y_j) for i in X
         * alpha_j = softmax(y_j * x_i)
     """

@@ -1,6 +1,7 @@
 import json
 import logging
 import sys
+import numpy
 from typing import Dict, List, Tuple, Any
 from collections import Counter, defaultdict
 
@@ -13,10 +14,12 @@ from allennlp.data.dataset_readers.reading_comprehension import util
 from allennlp.data.token_indexers import SingleIdTokenIndexer, TokenIndexer
 from allennlp.data.tokenizers import Token, Tokenizer, WordTokenizer
 from allennlp.data.fields import Field, TextField, IndexField, \
-    MetadataField, LabelField, ListField, SequenceLabelField
+    MetadataField, LabelField, ListField, SequenceLabelField, ArrayField
 from allennlp.data.instance import Instance
 from allennlp.data.token_indexers import TokenIndexer
 from allennlp.data.tokenizers import Token
+
+from utils import features
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
@@ -151,6 +154,12 @@ class SquadReader(DatasetReader):
                 ind += 1
                 # print(paragraph)
 
+                # from allennlp.data.tokenizers.token import show_token
+
+                # for i in range(10):
+                #     print(show_token(tokenized_paragraph[i]))
+                # raise RuntimeError("debug here")
+
                 instance = self.text_to_instance(question_text,
                                                  n_paragraph,
                                                  zip(span_starts, span_ends),
@@ -236,8 +245,9 @@ def make_reading_comprehension_instance(question_tokens: List[Token],
 
     # This is separate so we can reference it later with a known type.
     passage_field = TextField(passage_tokens, token_indexers)
+    question_field = TextField(question_tokens, token_indexers)
     fields['passage'] = passage_field
-    fields['question'] = TextField(question_tokens, token_indexers)
+    fields['question'] = question_field
     metadata = {'original_passage': passage_text, 'token_offsets': passage_offsets,
                 'question_tokens': [token.text for token in question_tokens],
                 'passage_tokens': [token.text for token in passage_tokens], }
@@ -258,6 +268,20 @@ def make_reading_comprehension_instance(question_tokens: List[Token],
         fields['span_start'] = IndexField(span_start, passage_field)
         fields['span_end'] = IndexField(span_end, passage_field)
         fields['yesno'] = LabelField(yesno, label_namespace="yesno_labels")
+
+    q_tf = features.get_tf(question_tokens)
+    p_tf = features.get_tf(passage_tokens)
+    fields['question_tf'] = ArrayField(numpy.array(q_tf))
+    fields['passage_tf'] = ArrayField(numpy.array(p_tf))
+
+    q_em_cased, q_em_uncased, q_in_lemma, p_em_cased, p_em_uncased, p_in_lemma = features.get_exact_match(
+        question_tokens, passage_tokens)
+    fields['q_em_cased'] = SequenceLabelField(q_em_cased, question_field, label_namespace="em_labels")
+    fields['p_em_cased'] = SequenceLabelField(p_em_cased, passage_field, label_namespace="em_labels")
+    fields['q_em_uncased'] = SequenceLabelField(q_em_uncased, question_field, label_namespace="em_labels")
+    fields['p_em_uncased'] = SequenceLabelField(p_em_uncased, passage_field, label_namespace="em_labels")
+    fields['q_in_lemma'] = SequenceLabelField(q_in_lemma, question_field, label_namespace="em_labels")
+    fields['p_in_lemma'] = SequenceLabelField(p_in_lemma, passage_field, label_namespace="em_labels")
 
     metadata.update(additional_metadata)
     fields['metadata'] = MetadataField(metadata)

@@ -8,9 +8,11 @@ Update:
 - version0/output_dir3: hops = 2, add char features rnn
 - version0/output_dir4: add ner and pos features embedding
 - version0/output_dir5: change the GloVe word vectors of 100 dimension to 300 dimension
+- version0/output_dir6: add tf, lemma and exact match features for tokens
 
 TODO:
-- Add tf and exact match features for token
+- ~~Add tf and exact match features for token~~
 - Add previous answer positional embedding and question turn id embedding
 - Add previous answer and question in the form
 - Update loss function in RL
+- Add bert
