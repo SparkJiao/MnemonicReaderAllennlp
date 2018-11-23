@@ -43,9 +43,9 @@
       "token_embedders": {
         "tokens": {
           "type": "embedding",
-          "pretrained_file": "https://s3-us-west-2.amazonaws.com/allennlp/datasets/glove/glove.6B.100d.txt.gz",
-          //          "pretrained_file": "glove.840B.300d.txt",
-          "embedding_dim": 100,
+          //          "pretrained_file": "https://s3-us-west-2.amazonaws.com/allennlp/datasets/glove/glove.6B.100d.txt.gz",
+          "pretrained_file": "glove.840B.300d.txt",
+          "embedding_dim": 300,
           "trainable": false
         },
         "token_characters": {
@@ -89,7 +89,7 @@
     "phrase_layer": {
       "type": "lstm",
       "bidirectional": true,
-      "input_size": 240,
+      "input_size": 440,
       "hidden_size": 100,
       "num_layers": 1,
       "dropout": 0.2
@@ -118,15 +118,15 @@
         "num_tokens"
       ]
     ],
-    "batch_size": 32,
-    "max_instances_in_memory": 32
+    "batch_size": 24,
+    "max_instances_in_memory": 24
   },
   "trainer": {
     "num_epochs": 40,
     "grad_norm": 5.0,
     "patience": 10,
     "validation_metric": "+em",
-    "cuda_device": 2,
+    "cuda_device": 0,
     "learning_rate_scheduler": {
       "type": "reduce_on_plateau",
       "factor": 0.5,

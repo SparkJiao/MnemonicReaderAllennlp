@@ -112,8 +112,8 @@ class BidirectionalAttentionFlow(Model):
         question_lstm_mask = question_mask if self._mask_lstms else None
         passage_lstm_mask = passage_mask if self._mask_lstms else None
 
-        token_emb_q, char_emb_q, question_word_features = torch.split(embedded_question, [100, 100, 40], dim=2)
-        token_emb_c, char_emb_c, passage_word_features = torch.split(embedded_passage, [100, 100, 40], dim=2)
+        token_emb_q, char_emb_q, question_word_features = torch.split(embedded_question, [300, 100, 40], dim=2)
+        token_emb_c, char_emb_c, passage_word_features = torch.split(embedded_passage, [300, 100, 40], dim=2)
 
         char_features_q = self._char_rnn(char_emb_q, question_lstm_mask)
         char_features_c = self._char_rnn(char_emb_c, passage_lstm_mask)
