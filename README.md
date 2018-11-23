@@ -8,7 +8,7 @@ Update:
 - version0/output_dir3: hops = 2, add char features rnn
 - version0/output_dir4: add ner and pos features embedding
 - version0/output_dir5: change the GloVe word vectors of 100 dimension to 300 dimension
-- version0/output_dir6: add tf, lemma and exact match features for tokens
+- version0/output_dir6: add tf, lemma and exact match features for tokens; remove highway layers of embedded question and passage; add dropout to the embedded question and passage.
 
 TODO:
 - ~~Add tf and exact match features for token~~
