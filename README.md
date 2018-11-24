@@ -9,6 +9,8 @@ Update:
 - version0/output_dir4: add ner and pos features embedding
 - version0/output_dir5: change the GloVe word vectors of 100 dimension to 300 dimension
 - version0/output_dir6: add tf, lemma and exact match features for tokens; remove highway layers of embedded question and passage; add dropout to the embedded question and passage.
+- version0/output_dir7: modified the learning rate of adam from 1e-4 to 1e-3
+- version0/output_dir8: modified the char embedding to use glove char-embedding; Complete the loss function;
 
 TODO:
 - ~~Add tf and exact match features for token~~

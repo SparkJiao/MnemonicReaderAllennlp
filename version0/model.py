@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 class BidirectionalAttentionFlow(Model):
     def __init__(self, vocab: Vocabulary,
                  text_field_embedder: TextFieldEmbedder,
+                 char_field_embedder: TextFieldEmbedder,
                  # num_highway_layers: int,
                  phrase_layer: Seq2SeqEncoder,
                  char_rnn: Seq2SeqEncoder,
@@ -38,6 +39,7 @@ class BidirectionalAttentionFlow(Model):
         super(BidirectionalAttentionFlow, self).__init__(vocab, regularizer)
 
         self._text_field_embedder = text_field_embedder
+        self._char_field_embedder = char_field_embedder
         self._features_embedder = nn.Embedding(2, 5)
         # self._highway_layer = TimeDistributed(Highway(text_field_embedder.get_output_dim() + 5 * 3,
         #                                               num_highway_layers))
@@ -111,38 +113,68 @@ class BidirectionalAttentionFlow(Model):
                 metadata: List[Dict[str, Any]] = None) -> Dict[str, torch.Tensor]:
         # pylint: disable=arguments-differ
 
-        embedded_question = torch.cat([self._dropout(self._text_field_embedder(question)),
-                                       self._features_embedder(q_em_cased),
-                                       self._features_embedder(q_em_uncased),
-                                       self._features_embedder(q_in_lemma),
-                                       question_tf.unsqueeze(2)], dim=2)
-        embedded_passage = torch.cat([self._dropout(self._text_field_embedder(passage)),
-                                      self._features_embedder(p_em_cased),
-                                      self._features_embedder(p_em_uncased),
-                                      self._features_embedder(p_in_lemma),
-                                      passage_tf.unsqueeze(2)], dim=2)
+        x1_c_emb = self._dropout(self._char_field_embedder(passage))
+        x2_c_emb = self._dropout(self._char_field_embedder(question))
+
+        # embedded_question = torch.cat([self._dropout(self._text_field_embedder(question)),
+        #                                self._features_embedder(q_em_cased),
+        #                                self._features_embedder(q_em_uncased),
+        #                                self._features_embedder(q_in_lemma),
+        #                                question_tf.unsqueeze(2)], dim=2)
+        # embedded_passage = torch.cat([self._dropout(self._text_field_embedder(passage)),
+        #                               self._features_embedder(p_em_cased),
+        #                               self._features_embedder(p_em_uncased),
+        #                               self._features_embedder(p_in_lemma),
+        #                               passage_tf.unsqueeze(2)], dim=2)
+        token_emb_q = self._dropout(self._text_field_embedder(question))
+        token_emb_c = self._dropout(self._text_field_embedder(passage))
+        token_emb_question, q_ner_and_pos = torch.split(token_emb_q, [300, 40], dim=2)
+        token_emb_passage, p_ner_and_pos = torch.split(token_emb_c, [300, 40], dim=2)
+        question_word_features = torch.cat([q_ner_and_pos,
+                                            self._features_embedder(q_em_cased),
+                                            self._features_embedder(q_em_uncased),
+                                            self._features_embedder(q_in_lemma),
+                                            question_tf.unsqueeze(2)], dim=2)
+        passage_word_features = torch.cat([p_ner_and_pos,
+                                           self._features_embedder(p_em_cased),
+                                           self._features_embedder(p_em_uncased),
+                                           self._features_embedder(p_in_lemma),
+                                           passage_tf.unsqueeze(2)], dim=2)
 
         # embedded_question = self._highway_layer(embedded_q)
         # embedded_passage = self._highway_layer(embedded_q)
 
-        batch_size = embedded_question.size(0)
-        passage_length = embedded_passage.size(1)
         question_mask = util.get_text_field_mask(question).float()
         passage_mask = util.get_text_field_mask(passage).float()
         question_lstm_mask = question_mask if self._mask_lstms else None
         passage_lstm_mask = passage_mask if self._mask_lstms else None
 
-        token_emb_q, char_emb_q, question_word_features = torch.split(embedded_question, [300, 100, 56], dim=2)
-        token_emb_c, char_emb_c, passage_word_features = torch.split(embedded_passage, [300, 100, 56], dim=2)
+        char_features_c = self._char_rnn(
+            x1_c_emb.reshape((x1_c_emb.size(0) * x1_c_emb.size(1), x1_c_emb.size(2), x1_c_emb.size(3))),
+            passage_lstm_mask.unsqueeze(2).repeat(1, 1, x1_c_emb.size(2)).reshape(
+                (x1_c_emb.size(0) * x1_c_emb.size(1), x1_c_emb.size(2)))
+        ).reshape((x1_c_emb.size(0), x1_c_emb.size(1), x1_c_emb.size(2), -1))[:, :, -1, :]
+        char_features_q = self._char_rnn(
+            x2_c_emb.reshape((x2_c_emb.size(0) * x2_c_emb.size(1), x2_c_emb.size(2), x2_c_emb.size(3))),
+            question_lstm_mask.unsqueeze(2).repeat(1, 1, x2_c_emb.size(2)).reshape(
+                (x2_c_emb.size(0) * x2_c_emb.size(1), x2_c_emb.size(2)))
+        ).reshape((x2_c_emb.size(0), x2_c_emb.size(1), x2_c_emb.size(2), -1))[:, :, -1, :]
 
-        char_features_q = self._char_rnn(char_emb_q, question_lstm_mask)
-        char_features_c = self._char_rnn(char_emb_c, passage_lstm_mask)
+        # token_emb_q, char_emb_q, question_word_features = torch.split(embedded_question, [300, 300, 56], dim=2)
+        # token_emb_c, char_emb_c, passage_word_features = torch.split(embedded_passage, [300, 300, 56], dim=2)
 
-        emb_question = torch.cat([token_emb_q, char_features_q, question_word_features], dim=2)
-        emb_passage = torch.cat([token_emb_c, char_features_c, passage_word_features], dim=2)
+        # char_features_q = self._char_rnn(char_emb_q, question_lstm_mask)
+        # char_features_c = self._char_rnn(char_emb_c, passage_lstm_mask)
+
+        emb_question = torch.cat([token_emb_question, char_features_q, question_word_features], dim=2)
+        emb_passage = torch.cat([token_emb_passage, char_features_c, passage_word_features], dim=2)
 
         encoded_question = self._dropout(self._phrase_layer(emb_question, question_lstm_mask))
         encoded_passage = self._dropout(self._phrase_layer(emb_passage, passage_lstm_mask))
+
+        batch_size = encoded_question.size(0)
+        passage_length = encoded_passage.size(1)
+
         encoding_dim = encoded_question.size(-1)
 
         # c_check = self._stacked_brnn(encoded_passage, passage_lstm_mask)
