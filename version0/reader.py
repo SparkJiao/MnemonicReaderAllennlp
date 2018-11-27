@@ -152,13 +152,6 @@ class SquadReader(DatasetReader):
                         span_ends.append(end)
 
                 ind += 1
-                # print(paragraph)
-
-                # from allennlp.data.tokenizers.token import show_token
-
-                # for i in range(10):
-                #     print(show_token(tokenized_paragraph[i]))
-                # raise RuntimeError("debug here")
 
                 instance = self.text_to_instance(question_text,
                                                  n_paragraph,

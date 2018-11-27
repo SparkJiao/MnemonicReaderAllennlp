@@ -81,6 +81,7 @@ class MemoryAnsPointer(nn.Module):
 
 
 class SeqAttnMatch(nn.Module):
+
     """Given sequences X and Y, match sequence Y to each element in X.
         * o_i = sum(alpha_j * y_j) for i in X
         * alpha_j = softmax(y_j * x_i)
@@ -100,10 +101,8 @@ class SeqAttnMatch(nn.Module):
         Output:
             matched_seq: batch * len1 * hdim
         """
-        x_pro = self.linear1(x)
-        x_pro = F.relu(x_pro)
-        y_pro = self.linear1(y)
-        y_pro = F.relu(y_pro)
+        x_pro = x
+        y_pro = y
 
         # b * len1 * len2
         scores = x_pro.bmm(y_pro.transpose(2, 1))
