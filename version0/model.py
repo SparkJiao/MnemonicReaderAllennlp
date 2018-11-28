@@ -4,14 +4,10 @@ from overrides import overrides
 import torch
 from torch.nn.functional import nll_loss
 
-from allennlp.common.checks import check_dimensions_match
 from allennlp.data import Vocabulary
 from allennlp.models.model import Model
-from allennlp.modules import Highway
-from allennlp.modules import Seq2SeqEncoder, SimilarityFunction, TimeDistributed, TextFieldEmbedder
+from allennlp.modules import Seq2SeqEncoder, TextFieldEmbedder
 from allennlp.modules.seq2seq_encoders.pytorch_seq2seq_wrapper import PytorchSeq2SeqWrapper
-from allennlp.modules.stacked_bidirectional_lstm import StackedBidirectionalLstm
-from allennlp.modules.matrix_attention.legacy_matrix_attention import LegacyMatrixAttention
 from allennlp.nn import util, InitializerApplicator, RegularizerApplicator
 from allennlp.training.metrics import BooleanAccuracy, CategoricalAccuracy, SquadEmAndF1
 
@@ -26,8 +22,6 @@ logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 class BidirectionalAttentionFlow(Model):
     def __init__(self, vocab: Vocabulary,
                  text_field_embedder: TextFieldEmbedder,
-                 char_field_embedder: TextFieldEmbedder,
-                 # num_highway_layers: int,
                  phrase_layer: Seq2SeqEncoder,
                  char_rnn: Seq2SeqEncoder,
                  hops: int,
@@ -39,15 +33,9 @@ class BidirectionalAttentionFlow(Model):
         super(BidirectionalAttentionFlow, self).__init__(vocab, regularizer)
 
         self._text_field_embedder = text_field_embedder
-        self._char_field_embedder = char_field_embedder
         self._features_embedder = nn.Embedding(2, 5)
-        # self._highway_layer = TimeDistributed(Highway(text_field_embedder.get_output_dim() + 5 * 3,
-        #                                               num_highway_layers))
         self._phrase_layer = phrase_layer
         self._encoding_dim = phrase_layer.get_output_dim()
-        # self._stacked_brnn = PytorchSeq2SeqWrapper(
-        #     StackedBidirectionalLstm(input_size=self._encoding_dim, hidden_size=hidden_dim,
-        #                              num_layers=3, recurrent_dropout_probability=0.2))
         self._char_rnn = char_rnn
 
         self.hops = hops
@@ -113,61 +101,30 @@ class BidirectionalAttentionFlow(Model):
                 metadata: List[Dict[str, Any]] = None) -> Dict[str, torch.Tensor]:
         # pylint: disable=arguments-differ
 
-        x1_c_emb = self._dropout(self._char_field_embedder(passage))
-        x2_c_emb = self._dropout(self._char_field_embedder(question))
-
-        # embedded_question = torch.cat([self._dropout(self._text_field_embedder(question)),
-        #                                self._features_embedder(q_em_cased),
-        #                                self._features_embedder(q_em_uncased),
-        #                                self._features_embedder(q_in_lemma),
-        #                                question_tf.unsqueeze(2)], dim=2)
-        # embedded_passage = torch.cat([self._dropout(self._text_field_embedder(passage)),
-        #                               self._features_embedder(p_em_cased),
-        #                               self._features_embedder(p_em_uncased),
-        #                               self._features_embedder(p_in_lemma),
-        #                               passage_tf.unsqueeze(2)], dim=2)
-        token_emb_q = self._dropout(self._text_field_embedder(question))
-        token_emb_c = self._dropout(self._text_field_embedder(passage))
-        token_emb_question, q_ner_and_pos = torch.split(token_emb_q, [300, 40], dim=2)
-        token_emb_passage, p_ner_and_pos = torch.split(token_emb_c, [300, 40], dim=2)
-        question_word_features = torch.cat([q_ner_and_pos,
-                                            self._features_embedder(q_em_cased),
-                                            self._features_embedder(q_em_uncased),
-                                            self._features_embedder(q_in_lemma),
-                                            question_tf.unsqueeze(2)], dim=2)
-        passage_word_features = torch.cat([p_ner_and_pos,
-                                           self._features_embedder(p_em_cased),
-                                           self._features_embedder(p_em_uncased),
-                                           self._features_embedder(p_in_lemma),
-                                           passage_tf.unsqueeze(2)], dim=2)
-
-        # embedded_question = self._highway_layer(embedded_q)
-        # embedded_passage = self._highway_layer(embedded_q)
+        embedded_question = torch.cat([self._dropout(self._text_field_embedder(question)),
+                                       self._features_embedder(q_em_cased),
+                                       self._features_embedder(q_em_uncased),
+                                       self._features_embedder(q_in_lemma),
+                                       question_tf.unsqueeze(2)], dim=2)
+        embedded_passage = torch.cat([self._dropout(self._text_field_embedder(passage)),
+                                      self._features_embedder(p_em_cased),
+                                      self._features_embedder(p_em_uncased),
+                                      self._features_embedder(p_in_lemma),
+                                      passage_tf.unsqueeze(2)], dim=2)
 
         question_mask = util.get_text_field_mask(question).float()
         passage_mask = util.get_text_field_mask(passage).float()
         question_lstm_mask = question_mask if self._mask_lstms else None
         passage_lstm_mask = passage_mask if self._mask_lstms else None
 
-        char_features_c = self._char_rnn(
-            x1_c_emb.reshape((x1_c_emb.size(0) * x1_c_emb.size(1), x1_c_emb.size(2), x1_c_emb.size(3))),
-            passage_lstm_mask.unsqueeze(2).repeat(1, 1, x1_c_emb.size(2)).reshape(
-                (x1_c_emb.size(0) * x1_c_emb.size(1), x1_c_emb.size(2)))
-        ).reshape((x1_c_emb.size(0), x1_c_emb.size(1), x1_c_emb.size(2), -1))[:, :, -1, :]
-        char_features_q = self._char_rnn(
-            x2_c_emb.reshape((x2_c_emb.size(0) * x2_c_emb.size(1), x2_c_emb.size(2), x2_c_emb.size(3))),
-            question_lstm_mask.unsqueeze(2).repeat(1, 1, x2_c_emb.size(2)).reshape(
-                (x2_c_emb.size(0) * x2_c_emb.size(1), x2_c_emb.size(2)))
-        ).reshape((x2_c_emb.size(0), x2_c_emb.size(1), x2_c_emb.size(2), -1))[:, :, -1, :]
+        token_emb_q, char_emb_q, question_word_features = torch.split(embedded_question, [300, 100, 56], dim=2)
+        token_emb_c, char_emb_c, passage_word_features = torch.split(embedded_passage, [300, 100, 56], dim=2)
 
-        # token_emb_q, char_emb_q, question_word_features = torch.split(embedded_question, [300, 300, 56], dim=2)
-        # token_emb_c, char_emb_c, passage_word_features = torch.split(embedded_passage, [300, 300, 56], dim=2)
+        char_features_q = self._char_rnn(char_emb_q, question_lstm_mask)
+        char_features_c = self._char_rnn(char_emb_c, passage_lstm_mask)
 
-        # char_features_q = self._char_rnn(char_emb_q, question_lstm_mask)
-        # char_features_c = self._char_rnn(char_emb_c, passage_lstm_mask)
-
-        emb_question = torch.cat([token_emb_question, char_features_q, question_word_features], dim=2)
-        emb_passage = torch.cat([token_emb_passage, char_features_c, passage_word_features], dim=2)
+        emb_question = torch.cat([token_emb_q, char_features_q, question_word_features], dim=2)
+        emb_passage = torch.cat([token_emb_c, char_features_c, passage_word_features], dim=2)
 
         encoded_question = self._dropout(self._phrase_layer(emb_question, question_lstm_mask))
         encoded_passage = self._dropout(self._phrase_layer(emb_passage, passage_lstm_mask))
@@ -177,8 +134,6 @@ class BidirectionalAttentionFlow(Model):
 
         encoding_dim = encoded_question.size(-1)
 
-        # c_check = self._stacked_brnn(encoded_passage, passage_lstm_mask)
-        # q = self._stacked_brnn(encoded_question, question_lstm_mask)
         c_check = encoded_passage
         q = encoded_question
         for i in range(self.hops):
@@ -195,8 +150,8 @@ class BidirectionalAttentionFlow(Model):
         best_span, yesno_predict, loc = self.get_best_span(start_scores, end_scores, yesno_scores)
 
         output_dict = {
-            "span_start_logits": start_scores,
-            "span_end_logits": end_scores,
+            # "span_start_logits": start_scores,
+            # "span_end_logits": end_scores,
             "best_span": best_span
         }
 
@@ -243,9 +198,9 @@ class BidirectionalAttentionFlow(Model):
                 answer_texts = metadata[i].get('answer_texts', [])
                 if answer_texts:
                     self._squad_metrics(best_span_string, answer_texts)
-            output_dict['question_tokens'] = question_tokens
-            output_dict['passage_tokens'] = passage_tokens
-            output_dict['yesno'] = yesno_predict
+            # output_dict['question_tokens'] = question_tokens
+            # output_dict['passage_tokens'] = passage_tokens
+            output_dict['yesno'] = yesno_predict.detach().cpu().numpy()
         return output_dict
 
     def get_metrics(self, reset: bool = False) -> Dict[str, float]:
@@ -261,7 +216,7 @@ class BidirectionalAttentionFlow(Model):
 
     @overrides
     def decode(self, output_dict: Dict[str, torch.Tensor]) -> Dict[str, Any]:
-        yesno_tags = [self.vocab.get_token_from_index(x, namespace="yesno_labels") for x in output_dict.pop("yesno")]
+        yesno_tags = [self.vocab.get_token_from_index(int(x), namespace="yesno_labels") for x in output_dict["yesno"]]
         output_dict['yesno'] = yesno_tags
         return output_dict
 

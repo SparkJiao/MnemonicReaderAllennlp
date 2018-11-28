@@ -1,6 +1,6 @@
 {
   "dataset_reader": {
-    "type": "coqa-bidaf-pp-yesno",
+    "type": "f1-reader",
     "lazy": false,
     "tokenizer": {
       "type": "word",
@@ -129,7 +129,7 @@
     "grad_norm": 5.0,
     "patience": 10,
     "validation_metric": "+f1",
-    "cuda_device": 2,
+    "cuda_device": 1,
     "learning_rate_scheduler": {
       "type": "reduce_on_plateau",
       "factor": 0.5,

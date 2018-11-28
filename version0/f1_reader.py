@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 # commands.main()
 
 
-@DatasetReader.register("coqa-bidaf-pp-yesno")
+@DatasetReader.register("f1-reader")
 class SquadReader(DatasetReader):
     """
     Reads a JSON-formatted SQuAD file and returns a ``Dataset`` where the ``Instances`` have four
@@ -71,121 +71,64 @@ class SquadReader(DatasetReader):
             dataset = dataset_json['data']
         logger.info("Reading the dataset")
 
-        num = 0
-        for story_id, paragraph_json in enumerate(dataset):
-            paragraph = paragraph_json["story"]
-            n_paragraph, padding = self.delete_leading_tokens_of_paragraph(paragraph)
-            tokenized_paragraph = self._tokenizer.tokenize(n_paragraph)
-            metadata = dict()
-            metadata['id'] = paragraph_json['id']
-            ind = 0
-            for question_answer in paragraph_json['questions']:
-                question_text = question_answer["input_text"].strip().replace("\n", "")
-                # question_text = question_answer["input_text"].replace("\n", "")
-                answer_texts = []
+        for story_id, article in enumerate(dataset):
+            # rows = []
+            context = article['story']
 
-                tmp = paragraph_json["answers"][ind]['span_text']
-                before = self.get_front_blanks(tmp, padding)
-                input_text = paragraph_json["answers"][ind]['input_text'].strip().replace("\n", "")
-                span_text = paragraph_json["answers"][ind]['span_text'].strip().replace("\n", "")
-                start = paragraph_json["answers"][ind]['span_start'] + before
-                end = start + len(span_text)
+            for j, (question, answers) in enumerate(zip(article['questions'], article['answers'])):
+                metadata = dict()
+                span_starts = list()
+                span_ends = list()
 
-                if input_text.lower() == 'yes':
-                    yesno = 'y'
-                    answer = span_text
-                elif input_text.lower() == 'no':
-                    yesno = 'n'
-                    answer = span_text
-                elif input_text.lower() == 'unknown':
-                    answer = n_paragraph[0]
+                metadata['id'] = article['id']
+                metadata['turn_id'] = j + 1
+
+                gold_answer = answers['input_text']
+                span_answer = answers['span_text']
+
+                answer, char_i, char_j = features.free_text_to_span(gold_answer, span_answer)
+                answer_choice = 0 if answer == '__NA__' else \
+                    1 if answer == '__YES__' else \
+                        2 if answer == '__NO__' else \
+                            3  # Not a yes/no question
+
+                if answer_choice == 0:
                     yesno = 'x'
-                    start = 0
-                    end = 0
+                elif answer_choice == 1:
+                    yesno = 'y'
+                elif answer_choice == 2:
+                    yesno = 'n'
                 else:
                     yesno = 'x'
-                    begin = span_text.find(input_text)
-                    if begin != -1:
-                        start = start + begin
-                        end = start + len(input_text)
-                        num += 1
-                    answer = input_text
 
-                answer_texts.append(answer)
+                if answer_choice == 3:
+                    answer_start = answers['span_start'] + char_i
+                    answer_end = answers['span_start'] + char_j
+                else:
+                    answer_start, answer_end = -1, -1
 
-                span_starts = list()
-                span_starts.append(start)
+                rationale = answers['span_text']
+                rationale_start = answers['span_start']
+                rationale_end = answers['span_end']
 
-                span_ends = list()
-                span_ends.append(end)
+                span_starts.append(answer_start)
+                span_ends.append(answer_end)
 
-                if "additional_answers" in paragraph_json:
-                    additional_answers = paragraph_json["additional_answers"]
-                    for key in additional_answers:
-                        tmp = additional_answers[key][ind]["span_text"]
-                        # answer = tmp.strip().replace("\n", "")
-                        before = self.get_front_blanks(tmp, padding)
-                        start = additional_answers[key][ind]["span_start"] + before
-                        span_text = additional_answers[key][ind]["span_text"].strip().replace("\n", "")
-                        input_text = additional_answers[key][ind]["input_text"].strip().replace("\n", "")
-                        end = start + len(span_text)
+                q_text = question['input_text']
+                # if j > 0:
+                #     q_text = article['answers'][j - 1]['input_text'] + " // " + q_text
 
-                        if input_text.lower() == 'yes':
-                            answer = span_text
-                        elif input_text.lower() == 'no':
-                            answer = span_text
-                        elif input_text.lower() == 'unknown':
-                            answer = n_paragraph[0]
-                            start = 0
-                            end = 0
-                        else:
-                            begin = span_text.find(input_text)
-                            if begin != -1:
-                                start = start + begin
-                                end = start + len(input_text)
-                                num += 1
-                            answer = input_text
-
-                        answer_texts.append(answer)
-                        span_starts.append(start)
-                        span_ends.append(end)
-
-                ind += 1
-                metadata['turn_id'] = ind
-
-                instance = self.text_to_instance(question_text,
-                                                 n_paragraph,
+                # rows.append(
+                #     (ith, q_text, answer, answer_start, answer_end, rationale, rationale_start, rationale_end,
+                #      answer_choice))
+                instance = self.text_to_instance(q_text,
+                                                 context,
                                                  zip(span_starts, span_ends),
-                                                 answer_texts,
+                                                 answer,
                                                  yesno,
-                                                 tokenized_paragraph,
+                                                 self._tokenizer.tokenize(context),
                                                  metadata)
-                # yesno dealing stop here 18.10.29
                 yield instance
-
-        logger.info('start and end changed num: %d' % num)
-        print('============================= %d ==================================' % num)
-
-    def get_front_blanks(self, answer, padding):
-        answer = answer.replace("\n", "")
-        before = 0
-        for i in range(len(answer)):
-            if answer[i] == ' ':
-                before += 1
-            else:
-                break
-        return before - padding
-
-    def delete_leading_tokens_of_paragraph(self, paragraph):
-        before = 0
-        for i in range(len(paragraph)):
-            if paragraph[i] == ' ' or paragraph[i] == '\n':
-                before += 1
-            else:
-                break
-
-        nparagraph = paragraph[before:]
-        return nparagraph, before
 
     @overrides
     def text_to_instance(self,  # type: ignore
@@ -195,7 +138,7 @@ class SquadReader(DatasetReader):
                          answer_texts: List[str] = None,
                          yesno: str = None,
                          passage_tokens: List[Token] = None,
-                         metadata = None) -> Instance:
+                         metadata=None) -> Instance:
         # pylint: disable=arguments-differ
         if not passage_tokens:
             passage_tokens = self._tokenizer.tokenize(passage_text)

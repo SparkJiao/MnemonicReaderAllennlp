@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 # commands.main()
 
 
-@DatasetReader.register("coqa-bidaf-pp-yesno")
+@DatasetReader.register("small-reader")
 class SquadReader(DatasetReader):
     """
     Reads a JSON-formatted SQuAD file and returns a ``Dataset`` where the ``Instances`` have four
@@ -74,8 +74,7 @@ class SquadReader(DatasetReader):
         num = 0
         for story_id, paragraph_json in enumerate(dataset):
             paragraph = paragraph_json["story"]
-            n_paragraph, padding = self.delete_leading_tokens_of_paragraph(paragraph)
-            tokenized_paragraph = self._tokenizer.tokenize(n_paragraph)
+            tokenized_paragraph = self._tokenizer.tokenize(paragraph)
             metadata = dict()
             metadata['id'] = paragraph_json['id']
             ind = 0
@@ -84,32 +83,34 @@ class SquadReader(DatasetReader):
                 # question_text = question_answer["input_text"].replace("\n", "")
                 answer_texts = []
 
-                tmp = paragraph_json["answers"][ind]['span_text']
-                before = self.get_front_blanks(tmp, padding)
-                input_text = paragraph_json["answers"][ind]['input_text'].strip().replace("\n", "")
-                span_text = paragraph_json["answers"][ind]['span_text'].strip().replace("\n", "")
-                start = paragraph_json["answers"][ind]['span_start'] + before
-                end = start + len(span_text)
-
-                if input_text.lower() == 'yes':
-                    yesno = 'y'
-                    answer = span_text
-                elif input_text.lower() == 'no':
-                    yesno = 'n'
-                    answer = span_text
-                elif input_text.lower() == 'unknown':
-                    answer = n_paragraph[0]
-                    yesno = 'x'
+                if paragraph_json["answers"][ind]['span_start'] == -1:
                     start = 0
                     end = 0
+                    answer = "CANNOTUNSWER"
                 else:
-                    yesno = 'x'
+                    tmp = paragraph_json["answers"][ind]['span_text']
+                    before = self.get_front_blanks(tmp, 0)
+                    input_text = paragraph_json["answers"][ind]['input_text'].strip().replace('\n', '')
+                    span_text = paragraph_json["answers"][ind]['span_text'].strip().replace('\n', '')
+                    start = paragraph_json["answers"][ind]['span_start'] + before
+                    end = start + len(span_text)
+                    r_input_text = input_text.replace('\n', '').lower()
+
                     begin = span_text.find(input_text)
                     if begin != -1:
                         start = start + begin
                         end = start + len(input_text)
                         num += 1
-                    answer = input_text
+                        answer = input_text
+                        yesno = 'x'
+                    else:
+                        if r_input_text == 'yes':
+                            yesno = 'y'
+                        elif r_input_text == 'no':
+                            yesno = 'n'
+                        else:
+                            yesno = 'x'
+                        answer = span_text
 
                 answer_texts.append(answer)
 
@@ -122,29 +123,28 @@ class SquadReader(DatasetReader):
                 if "additional_answers" in paragraph_json:
                     additional_answers = paragraph_json["additional_answers"]
                     for key in additional_answers:
-                        tmp = additional_answers[key][ind]["span_text"]
-                        # answer = tmp.strip().replace("\n", "")
-                        before = self.get_front_blanks(tmp, padding)
-                        start = additional_answers[key][ind]["span_start"] + before
-                        span_text = additional_answers[key][ind]["span_text"].strip().replace("\n", "")
-                        input_text = additional_answers[key][ind]["input_text"].strip().replace("\n", "")
-                        end = start + len(span_text)
-
-                        if input_text.lower() == 'yes':
-                            answer = span_text
-                        elif input_text.lower() == 'no':
-                            answer = span_text
-                        elif input_text.lower() == 'unknown':
-                            answer = n_paragraph[0]
+                        if additional_answers[key][ind]['span_start'] == -1:
                             start = 0
                             end = 0
+                            answer = 'CANNOTANSWER'
                         else:
+                            tmp = additional_answers[key][ind]["span_text"]
+                            # answer = tmp.strip().replace("\n", "")
+                            before = self.get_front_blanks(tmp, 0)
+                            start = additional_answers[key][ind]["span_start"] + before
+                            span_text = additional_answers[key][ind]["span_text"].strip().replace('\n', '')
+                            input_text = additional_answers[key][ind]["input_text"].strip().replace('\n', '')
+                            end = start + len(span_text)
+                            r_input_text = input_text.lower()
+
                             begin = span_text.find(input_text)
                             if begin != -1:
                                 start = start + begin
                                 end = start + len(input_text)
                                 num += 1
-                            answer = input_text
+                                answer = input_text
+                            else:
+                                answer = span_text
 
                         answer_texts.append(answer)
                         span_starts.append(start)
@@ -154,7 +154,7 @@ class SquadReader(DatasetReader):
                 metadata['turn_id'] = ind
 
                 instance = self.text_to_instance(question_text,
-                                                 n_paragraph,
+                                                 paragraph,
                                                  zip(span_starts, span_ends),
                                                  answer_texts,
                                                  yesno,
@@ -167,10 +167,9 @@ class SquadReader(DatasetReader):
         print('============================= %d ==================================' % num)
 
     def get_front_blanks(self, answer, padding):
-        answer = answer.replace("\n", "")
         before = 0
         for i in range(len(answer)):
-            if answer[i] == ' ':
+            if answer[i] == ' ' or answer[i] == '\n':
                 before += 1
             else:
                 break
@@ -195,7 +194,7 @@ class SquadReader(DatasetReader):
                          answer_texts: List[str] = None,
                          yesno: str = None,
                          passage_tokens: List[Token] = None,
-                         metadata = None) -> Instance:
+                         metadata=None) -> Instance:
         # pylint: disable=arguments-differ
         if not passage_tokens:
             passage_tokens = self._tokenizer.tokenize(passage_text)
